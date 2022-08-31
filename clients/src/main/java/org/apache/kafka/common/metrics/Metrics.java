@@ -51,6 +51,9 @@ import static java.util.Collections.emptyList;
  * with this sensor a metric for the average, maximum, or other statistics computed off the sequence of message sizes
  * that are recorded by the sensor.
  * <p>
+ * Metric 指标
+ * Sensor 采集器，采集原始数据，并基于原始数据计算对应的指标
+ * Metrics 指标和采集器的全局仓库
  * Usage looks something like this:
  * 
  * <pre>
@@ -413,6 +416,7 @@ public class Metrics implements Closeable {
             s = new Sensor(this, name, parents, config == null ? this.config : config, time, inactiveSensorExpirationTimeSeconds, recordingLevel);
             this.sensors.put(name, s);
             if (parents != null) {
+                // 将当前sensor添加到每一个parent的children列表中
                 for (Sensor parent : parents) {
                     List<Sensor> children = childrenSensors.computeIfAbsent(parent, k -> new ArrayList<>());
                     children.add(s);

@@ -29,11 +29,13 @@ public class Avg extends SampledStat {
         super(0.0);
     }
 
+    // 更新样本值
     @Override
     protected void update(Sample sample, MetricConfig config, double value, long now) {
         sample.value += value;
     }
 
+    // 计算统计值（avg）
     @Override
     public double combine(List<Sample> samples, MetricConfig config, long now) {
         double total = 0.0;

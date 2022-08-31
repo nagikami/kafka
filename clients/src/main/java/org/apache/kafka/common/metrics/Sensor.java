@@ -39,6 +39,7 @@ import static java.util.Collections.unmodifiableList;
  * A sensor applies a continuous sequence of numerical values to a set of associated metrics. For example a sensor on
  * message size would record a sequence of message sizes using the {@link #record(double)} api and would maintain a set
  * of metrics about request sizes such as the average or max.
+ * 采集原始数据，并基于原始数据计算对应的指标
  */
 public final class Sensor {
 

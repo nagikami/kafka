@@ -23,6 +23,7 @@ import java.util.List;
 /**
  * A compound stat is a stat where a single measurement and associated data structure feeds many metrics. This is the
  * example for a histogram which has many associated percentiles.
+ * 复合状态，维护一个状态集合
  */
 public interface CompoundStat extends Stat {
 

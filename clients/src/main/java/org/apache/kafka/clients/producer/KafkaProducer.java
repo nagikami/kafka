@@ -147,16 +147,19 @@ import java.util.concurrent.atomic.AtomicReference;
  * their <code>ProducerRecord</code> into bytes. You can use the included {@link org.apache.kafka.common.serialization.ByteArraySerializer} or
  * {@link org.apache.kafka.common.serialization.StringSerializer} for simple string or byte types.
  * <p>
- * From Kafka 0.11, the KafkaProducer supports two additional modes: the idempotent producer and the transactional producer.
+ * From Kafka 0.11, the KafkaProducer supports two additional modes: the idempotent（幂等） producer and the transactional producer.
  * The idempotent producer strengthens Kafka's delivery semantics from at least once to exactly once delivery. In particular
  * producer retries will no longer introduce duplicates. The transactional producer allows an application to send messages
  * to multiple partitions (and topics!) atomically.
+ * 幂等生产者保证记录有且只有一个，避免重试引起的记录重复
+ * 事务生产者保证多分区多主题的消息自动发送满足事务
  * </p>
  * <p>
  * From Kafka 3.0, the <code>enable.idempotence</code> configuration defaults to true. When enabling idempotence,
  * <code>retries</code> config will default to <code>Integer.MAX_VALUE</code> and the <code>acks</code> config will
  * default to <code>all</code>. There are no API changes for the idempotent producer, so existing applications will
  * not need to be modified to take advantage of this feature.
+ * 3.0后默认开启幂等性，开启幂等性后重试次数默认为Integer.MAX_VALUE，acks默认为all
  * </p>
  * <p>
  * To take advantage of the idempotent producer, it is imperative to avoid application level re-sends since these cannot
@@ -165,22 +168,31 @@ import java.util.concurrent.atomic.AtomicReference;
  * returns an error even with infinite retries (for instance if the message expires in the buffer before being sent),
  * then it is recommended to shut down the producer and check the contents of the last produced message to ensure that
  * it is not duplicated. Finally, the producer can only guarantee idempotence for messages sent within a single session.
+ * 为保证幂等性需要保证没有应用级别的重复
+ * 消息发送失败后，需要停止生产者，检查是否发生消息重复
+ * 幂等性只在同一个session生效
  * </p>
- * <p>To use the transactional producer and the attendant APIs, you must set the <code>transactional.id</code>
+ * <p>To use the transactional producer and the attendant（跟随的） APIs, you must set the <code>transactional.id</code>
  * configuration property. If the <code>transactional.id</code> is set, idempotence is automatically enabled along with
  * the producer configs which idempotence depends on. Further, topics which are included in transactions should be configured
  * for durability. In particular, the <code>replication.factor</code> should be at least <code>3</code>, and the
  * <code>min.insync.replicas</code> for these topics should be set to 2. Finally, in order for transactional guarantees
  * to be realized from end-to-end, the consumers must be configured to read only committed messages as well.
+ * 使用事务必须配置transactional.id，配置transactional.id后，自动开启幂等性及相关配置
+ * 事务涉及的主题需要可持久化，replication.factor至少为3，min.insync.replicas为2
+ * 为保证端到端的事务，消费者只能读取已提交的消息
  * </p>
  * <p>
  * The purpose of the <code>transactional.id</code> is to enable transaction recovery across multiple sessions of a
  * single producer instance. It would typically be derived from the shard identifier in a partitioned, stateful, application.
  * As such, it should be unique to each producer instance running within a partitioned application.
+ * transactional.id用于在单个生产者实例的多个session间恢复数据
+ * transactional.id必须派生自可分区的、有状态的应用的分片标识符，且保证每个生产者实例唯一
  * </p>
  * <p>All the new transactional APIs are blocking and will throw exceptions on failure. The example
  * below illustrates how the new APIs are meant to be used. It is similar to the example above, except that all
  * 100 messages are part of a single transaction.
+ * 所有的事务API都是阻塞和失败抛异常的
  * </p>
  * <p>
  * <pre>
@@ -222,6 +234,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * </p>By calling
  * <code>producer.abortTransaction()</code> upon receiving a <code>KafkaException</code> we can ensure that any
  * successful writes are marked as aborted, hence keeping the transactional guarantees.
+ * 通过在捕获异常时调用producer.abortTransaction()标记已经完成的write为aborted来实现回滚，保证事务
  * </p>
  * <p>
  * This client can communicate with brokers that are version 0.10.0 or newer. Older or newer brokers may not support
@@ -241,18 +254,24 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     final Metrics metrics;
     private final KafkaProducerMetrics producerMetrics;
     private final Partitioner partitioner;
+    // 消息最大长度，包含消息头、序列化后的key和value的长度
     private final int maxRequestSize;
     private final long totalMemorySize;
     private final ProducerMetadata metadata;
+    // 消息缓冲池大小
     private final RecordAccumulator accumulator;
+    // 消息发送任务
     private final Sender sender;
+    // 消息发送线程
     private final Thread ioThread;
     private final CompressionType compressionType;
     private final Sensor errors;
     private final Time time;
     private final Serializer<K> keySerializer;
     private final Serializer<V> valueSerializer;
+    // 生产者配置集
     private final ProducerConfig producerConfig;
+    // 获取集群元数据最大等待时长
     private final long maxBlockTimeMs;
     private final ProducerInterceptors<K, V> interceptors;
     private final ApiVersions apiVersions;
@@ -356,6 +375,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     config.originalsWithPrefix(CommonClientConfigs.METRICS_CONTEXT_PREFIX));
             this.metrics = new Metrics(metricConfig, reporters, time, metricsContext);
             this.producerMetrics = new KafkaProducerMetrics(metrics);
+            // 获取配置完成的分区器
             this.partitioner = config.getConfiguredInstance(
                     ProducerConfig.PARTITIONER_CLASS_CONFIG,
                     Partitioner.class,
