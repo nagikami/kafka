@@ -823,10 +823,13 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * The send is asynchronous and this method will return immediately once the record has been stored in the buffer of
      * records waiting to be sent. This allows sending many records in parallel without blocking to wait for the
      * response after each one.
+     * send方法在record加入到buffer后立即返回，返回值为异步发送任务的future
      * <p>
      * The result of the send is a {@link RecordMetadata} specifying the partition the record was sent to, the offset
      * it was assigned and the timestamp of the record. If the producer is configured with acks = 0, the {@link RecordMetadata}
      * will have offset = -1 because the producer does not wait for the acknowledgement from the broker.
+     * 如果acks设置为0，返回的offset为-1，因为生产者没有等待broker的响应，在请求发送后就直接返回future，
+     * 所以没有从broker的响应获取offset
      * If {@link org.apache.kafka.common.record.TimestampType#CREATE_TIME CreateTime} is used by the topic, the timestamp
      * will be the user provided timestamp or the record send time if the user did not specify a timestamp for the
      * record. If {@link org.apache.kafka.common.record.TimestampType#LOG_APPEND_TIME LogAppendTime} is used for the
@@ -881,14 +884,17 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * the final {@link #commitTransaction()} call will fail and throw the exception from the last failed send. When
      * this happens, your application should call {@link #abortTransaction()} to reset the state and continue to send
      * data.
+     * 如果发送行为作为事务的一部分，则不需要定义回调函数去处理error，因为一旦失败commitTransaction会立刻抛出异常，
+     * 终止事务执行，此时只需要捕获异常并调用abortTransaction回滚事务
      * </p>
      * <p>
      * Some transactional send errors cannot be resolved with a call to {@link #abortTransaction()}.  In particular,
      * if a transactional send finishes with a {@link ProducerFencedException}, a {@link org.apache.kafka.common.errors.OutOfOrderSequenceException},
      * a {@link org.apache.kafka.common.errors.UnsupportedVersionException}, or an
      * {@link org.apache.kafka.common.errors.AuthorizationException}, then the only option left is to call {@link #close()}.
-     * Fatal errors cause the producer to enter a defunct state in which future API calls will continue to raise
+     * Fatal errors cause the producer to enter a defunct（已失效） state in which future API calls will continue to raise
      * the same underyling error wrapped in a new {@link KafkaException}.
+     * 当发生abortTransaction无法处理的致命错误时，调用close方法，因为此时生产者已经进入只能抛出异常的死亡状态了
      * </p>
      * <p>
      * It is a similar picture when idempotence is enabled, but no <code>transactional.id</code> has been configured.
@@ -898,6 +904,8 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * sending after receiving an {@link org.apache.kafka.common.errors.OutOfOrderSequenceException}, but doing so
      * can result in out of order delivery of pending messages. To ensure proper ordering, you should close the
      * producer and create a new instance.
+     * 在开启幂等性但是不开启事务（不配置transactional.id）时，UnsupportedVersionException、AuthorizationException
+     * 是致命错误，但是可以不处理ProducerFencedException，在不需要保证顺序的情况下也可以不处理OutOfOrderSequenceException
      * </p>
      * <p>
      * If the message format of the destination topic is not upgraded to 0.11.0.0, idempotent and transactional
@@ -928,6 +936,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     @Override
     public Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback) {
         // intercept the record, which can be potentially modified; this method does not throw exceptions
+        // 交给拦截器链处理，发送前调用onSend，发送后调用onAcknowledgement
         ProducerRecord<K, V> interceptedRecord = this.interceptors.onSend(record);
         return doSend(interceptedRecord, callback);
     }
@@ -950,8 +959,10 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             long nowMs = time.milliseconds();
             ClusterAndWaitTime clusterAndWaitTime;
             try {
+                // 获集群元数据
                 clusterAndWaitTime = waitOnMetadata(record.topic(), record.partition(), nowMs, maxBlockTimeMs);
             } catch (KafkaException e) {
+                // 检查生产者是否停止，停止则抛异常
                 if (metadata.isClosed())
                     throw new KafkaException("Producer closed while send in progress", e);
                 throw e;
@@ -1077,13 +1088,16 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      */
     private ClusterAndWaitTime waitOnMetadata(String topic, Integer partition, long nowMs, long maxWaitMs) throws InterruptedException {
         // add topic to metadata topic list if it is not there already and reset expiry
+        // 获取缓存的集群元数据
         Cluster cluster = metadata.fetch();
 
         if (cluster.invalidTopics().contains(topic))
             throw new InvalidTopicException(topic);
 
+        // 将topic信息添加到元数据缓存
         metadata.add(topic, nowMs);
 
+        // 缓存获取到分区信息，且partition合法，则直接返回缓冲中获取的集群元数据
         Integer partitionsCount = cluster.partitionCountForTopic(topic);
         // Return cached metadata if we have it, and if the record's partition is either undefined
         // or within the known partition range
@@ -1101,10 +1115,13 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             } else {
                 log.trace("Requesting metadata update for topic {}.", topic);
             }
+            // 更新topic元数据缓存过期时间
             metadata.add(topic, nowMs + elapsed);
             int version = metadata.requestUpdateForTopic(topic);
+            // 异步获取集群元数据
             sender.wakeup();
             try {
+                // 阻塞，直到元数据更新成功，或者超时
                 metadata.awaitUpdate(version, remainingWaitMs);
             } catch (TimeoutException ex) {
                 // Rethrow with original maxWaitMs to prevent logging exception with remainingWaitMs
@@ -1112,7 +1129,9 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                         String.format("Topic %s not present in metadata after %d ms.",
                                 topic, maxWaitMs));
             }
+            // 获取元数据
             cluster = metadata.fetch();
+            // 计算元数据更新时间
             elapsed = time.milliseconds() - nowMs;
             if (elapsed >= maxWaitMs) {
                 throw new TimeoutException(partitionsCount == null ?
@@ -1124,6 +1143,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             metadata.maybeThrowExceptionForTopic(topic);
             remainingWaitMs = maxWaitMs - elapsed;
             partitionsCount = cluster.partitionCountForTopic(topic);
+            // 循环直到获取到分区
         } while (partitionsCount == null || (partition != null && partition >= partitionsCount));
 
         return new ClusterAndWaitTime(cluster, elapsed);

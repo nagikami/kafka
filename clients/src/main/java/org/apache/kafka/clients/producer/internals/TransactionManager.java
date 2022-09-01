@@ -224,6 +224,8 @@ public class TransactionManager {
     // The value of the map is the sequence number of the batch following the expired one, computed by adding its
     // record count to its sequence number. This is used to tell if a subsequent batch is the one immediately following
     // the expired one.
+    // 如果一个partition的batch在至少发送一次后在指定时间内未获得成功响应，则将随后的batch的序号保存，
+    // 并在该batch处理完成前不为改partition分配新的batch
     private final Map<TopicPartition, Integer> partitionsWithUnresolvedSequences;
 
     // The partitions that have received an error that triggers an epoch bump. When the epoch is bumped, these
@@ -830,6 +832,7 @@ public class TransactionManager {
 
     // Attempts to resolve unresolved sequences. If all in-flight requests are complete and some partitions are still
     // unresolved, either bump the epoch if possible, or transition to a fatal error
+    // 尝试处理未处理的batch
     synchronized void maybeResolveSequences() {
         for (Iterator<TopicPartition> iter = partitionsWithUnresolvedSequences.keySet().iterator(); iter.hasNext(); ) {
             TopicPartition topicPartition = iter.next();
