@@ -165,19 +165,23 @@ public class TransactionManager {
     private static class TopicPartitionEntry {
 
         // The producer id/epoch being used for a given partition.
+        // 生产者id
         private ProducerIdAndEpoch producerIdAndEpoch;
 
         // The base sequence of the next batch bound for a given partition.
+        // 下一个批次号
         private int nextSequence;
 
         // The sequence number of the last record of the last ack'd batch from the given partition. When there are no
         // in flight requests for a partition, the lastAckedSequence(topicPartition) == nextSequence(topicPartition) - 1.
+        // 最后响应的批次号
         private int lastAckedSequence;
 
         // Keep track of the in flight batches bound for a partition, ordered by sequence. This helps us to ensure that
         // we continue to order batches by the sequence numbers even when the responses come back out of order during
         // leader failover. We add a batch to the queue when it is drained, and remove it when the batch completes
         // (either successfully or through a fatal failure).
+        // 按照批次号保存正在处理的batch
         private SortedSet<ProducerBatch> inflightBatchesBySequence;
 
         // We keep track of the last acknowledged offset on a per partition basis in order to disambiguate UnknownProducer
