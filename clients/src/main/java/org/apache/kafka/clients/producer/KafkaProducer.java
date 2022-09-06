@@ -408,8 +408,11 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 this.interceptors = new ProducerInterceptors<>(interceptorList);
             ClusterResourceListeners clusterResourceListeners = configureClusterResourceListeners(keySerializer,
                     valueSerializer, interceptorList, reporters);
+            // 最大消息大小，1M
             this.maxRequestSize = config.getInt(ProducerConfig.MAX_REQUEST_SIZE_CONFIG);
+            // 缓冲区大小，默认32M
             this.totalMemorySize = config.getLong(ProducerConfig.BUFFER_MEMORY_CONFIG);
+            // 数据压缩格式
             this.compressionType = CompressionType.forName(config.getString(ProducerConfig.COMPRESSION_TYPE_CONFIG));
 
             this.maxBlockTimeMs = config.getLong(ProducerConfig.MAX_BLOCK_MS_CONFIG);
@@ -418,10 +421,13 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             this.apiVersions = new ApiVersions();
             this.transactionManager = configureTransactionState(config, logContext);
             this.accumulator = new RecordAccumulator(logContext,
+                    // 批大小，默认16KB
                     config.getInt(ProducerConfig.BATCH_SIZE_CONFIG),
                     this.compressionType,
                     lingerMs(config),
+                    // 重试间隔100ms
                     retryBackoffMs,
+                    // 发送超时时间，默人2min
                     deliveryTimeoutMs,
                     metrics,
                     PRODUCER_METRIC_GROUP_NAME,
@@ -437,7 +443,9 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 this.metadata = metadata;
             } else {
                 this.metadata = new ProducerMetadata(retryBackoffMs,
+                        // 元数据拉取间隔，默认5min
                         config.getLong(ProducerConfig.METADATA_MAX_AGE_CONFIG),
+                        // topic信息在缓存中的最大空闲时间，默认5min
                         config.getLong(ProducerConfig.METADATA_MAX_IDLE_CONFIG),
                         logContext,
                         clusterResourceListeners,
@@ -970,6 +978,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             nowMs += clusterAndWaitTime.waitedOnMetadataMs;
             long remainingWaitMs = Math.max(0, maxBlockTimeMs - clusterAndWaitTime.waitedOnMetadataMs);
             Cluster cluster = clusterAndWaitTime.cluster;
+            // 对key和value进行序列化
             byte[] serializedKey;
             try {
                 serializedKey = keySerializer.serialize(record.topic(), record.headers(), record.key());
@@ -986,20 +995,24 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                         " to class " + producerConfig.getClass(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG).getName() +
                         " specified in value.serializer", cce);
             }
+            // 获取分区，默认key存在则hash取模，不存在则为topic随机获取一个固定的分区
             int partition = partition(record, serializedKey, serializedValue, cluster);
             tp = new TopicPartition(record.topic(), partition);
 
             setReadOnly(record.headers());
             Header[] headers = record.headers().toArray();
 
+            // 计算消息大小
             int serializedSize = AbstractRecords.estimateSizeInBytesUpperBound(apiVersions.maxUsableProduceMagic(),
                     compressionType, serializedKey, serializedValue, headers);
             ensureValidRecordSize(serializedSize);
+            // 计算消息时间戳
             long timestamp = record.timestamp() == null ? nowMs : record.timestamp();
             if (log.isTraceEnabled()) {
                 log.trace("Attempting to append record {} with callback {} to topic {} partition {}", record, callback, record.topic(), partition);
             }
             // producer callback will make sure to call both 'callback' and interceptor callback
+            // 构造回调函数，包含用户自定义和拦截器链的回调函数
             Callback interceptCallback = new InterceptorCallback<>(callback, this.interceptors, tp);
 
             RecordAccumulator.RecordAppendResult result = accumulator.append(tp, timestamp, serializedKey,
@@ -1129,7 +1142,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                         String.format("Topic %s not present in metadata after %d ms.",
                                 topic, maxWaitMs));
             }
-            // 获取元数据
+            // 从缓存获取元数据
             cluster = metadata.fetch();
             // 计算元数据更新时间
             elapsed = time.milliseconds() - nowMs;

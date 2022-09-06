@@ -238,6 +238,7 @@ public class Metadata implements Closeable {
     public synchronized void bootstrap(List<InetSocketAddress> addresses) {
         this.needFullUpdate = true;
         this.updateVersion += 1;
+        // 初始化元数据缓存
         this.cache = MetadataCache.bootstrap(addresses);
     }
 

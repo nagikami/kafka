@@ -74,6 +74,7 @@ import java.util.stream.Collectors;
  * <p/>
  * This class can be used standalone or in combination with {@link AbstractConfig} which provides some additional
  * functionality for accessing configs.
+ * 对key进行定义和处理，保证key的可见性，value保存在ProducerConfig
  */
 public class ConfigDef {
 

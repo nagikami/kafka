@@ -436,6 +436,7 @@ public class NetworkClient implements KafkaClient {
     public boolean isReady(Node node, long now) {
         // if we need to update our metadata now declare all requests unready to make metadata requests first
         // priority
+        // 元数据未过期，并且节点可以发送更多请求
         return !metadataUpdater.isUpdateDue(now) && canSendRequest(node.idString(), now);
     }
 
@@ -1018,6 +1019,7 @@ public class NetworkClient implements KafkaClient {
             return metadata.fetch().nodes();
         }
 
+        // 更新是否过期
         @Override
         public boolean isUpdateDue(long now) {
             return !hasFetchInProgress() && this.metadata.timeToNextUpdate(now) == 0;

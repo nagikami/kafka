@@ -174,7 +174,7 @@ public class TransactionManager {
 
         // The sequence number of the last record of the last ack'd batch from the given partition. When there are no
         // in flight requests for a partition, the lastAckedSequence(topicPartition) == nextSequence(topicPartition) - 1.
-        // 最后响应的批次号
+        // 最后承认的批次号
         private int lastAckedSequence;
 
         // Keep track of the in flight batches bound for a partition, ordered by sequence. This helps us to ensure that
@@ -184,14 +184,17 @@ public class TransactionManager {
         // 按照批次号保存正在处理的batch
         private SortedSet<ProducerBatch> inflightBatchesBySequence;
 
-        // We keep track of the last acknowledged offset on a per partition basis in order to disambiguate UnknownProducer
+        // We keep track of the last acknowledged offset on a per partition basis in order to disambiguate（消除歧义） UnknownProducer
         // responses which are due to the retention period elapsing, and those which are due to actual lost data.
+        // 分区最后获得承认的偏移量
         private long lastAckedOffset;
 
         // `inflightBatchesBySequence` should only have batches with the same producer id and producer
         // epoch, but there is an edge case where we may remove the wrong batch if the comparator
         // only takes `baseSequence` into account.
         // See https://github.com/apache/kafka/pull/12096#pullrequestreview-955554191 for details.
+        // id相同则比较epoch，epoch相同则比较序号
+        // 通过thenComparing嵌套包装compare
         private static final Comparator<ProducerBatch> PRODUCER_BATCH_COMPARATOR =
             Comparator.comparingLong(ProducerBatch::producerId)
                 .thenComparingInt(ProducerBatch::producerEpoch)
@@ -229,7 +232,7 @@ public class TransactionManager {
     // record count to its sequence number. This is used to tell if a subsequent batch is the one immediately following
     // the expired one.
     // 如果一个partition的batch在至少发送一次后在指定时间内未获得成功响应，则将随后的batch的序号保存，
-    // 并在该batch处理完成前不为改partition分配新的batch
+    // 并在该batch处理完成前不为该partition分配新的batch
     private final Map<TopicPartition, Integer> partitionsWithUnresolvedSequences;
 
     // The partitions that have received an error that triggers an epoch bump. When the epoch is bumped, these
@@ -844,13 +847,15 @@ public class TransactionManager {
                 // The partition has been fully drained. At this point, the last ack'd sequence should be one less than
                 // next sequence destined for the partition. If so, the partition is fully resolved. If not, we should
                 // reset the sequence number if necessary.
+                // 最后承认的序号为当前分区分配的最后的序号
                 if (isNextSequence(topicPartition, sequenceNumber(topicPartition))) {
                     // This would happen when a batch was expired, but subsequent batches succeeded.
                     iter.remove();
                 } else {
                     // We would enter this branch if all in flight batches were ultimately expired in the producer.
+                    // 分配给partition的最后的序号对应batch过期
                     if (isTransactional()) {
-                        // For the transactional producer, we bump the epoch if possible, otherwise we transition to a fatal error
+                        // For the transactional producer, we bump（撞） the epoch if possible, otherwise we transition to a fatal error
                         String unackedMessagesErr = "The client hasn't received acknowledgment for some previously " +
                                 "sent messages and can no longer retry them. ";
                         if (canBumpEpoch()) {
